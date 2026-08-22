@@ -277,31 +277,42 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
   ];
 
   return (
-    <div className="h-screen max-h-screen h-dvh bg-slate-950 text-slate-100 flex flex-col justify-between p-2 sm:p-4 lg:p-6 font-sans overflow-hidden">
-      {/* Top Bar Header */}
-      <div className="flex items-center justify-between max-w-2xl mx-auto w-full mb-1.5 sm:mb-3 shrink-0">
-        <div className="flex items-center gap-2 sm:gap-3">
-          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 p-0.5 shadow-md">
+    <div
+      className="min-h-screen min-h-dvh bg-slate-950 text-slate-100 flex flex-col justify-between p-3 sm:p-4 lg:p-6 font-sans overflow-y-auto sm:overflow-hidden select-none kiosk-viewport"
+      style={{
+        paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)',
+        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 16px)',
+        paddingLeft: 'max(env(safe-area-inset-left, 0px), 12px)',
+        paddingRight: 'max(env(safe-area-inset-right, 0px), 12px)',
+      }}
+    >
+      {/* Top Bar Header (Safe from iPhone Notch & Dynamic Island) */}
+      <div className="flex items-center justify-between max-w-2xl mx-auto w-full mb-2 sm:mb-3 shrink-0 gap-2">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 p-0.5 shadow-md shrink-0">
             <div className="w-full h-full bg-slate-950 rounded-[10px] sm:rounded-[14px] flex items-center justify-center text-emerald-400">
               <Dumbbell className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
           </div>
-          <div>
-            <h1 className="text-sm sm:text-lg font-black text-white tracking-tight flex items-center gap-1.5">
-              {currentStore.toUpperCase()} SELF CHECK-IN
-              <span className="text-[9px] uppercase bg-emerald-500/20 text-emerald-300 font-mono px-1.5 py-0.2 rounded-full border border-emerald-500/30">
+          <div className="min-w-0">
+            <h1 className="text-xs sm:text-base md:text-lg font-black text-white tracking-tight flex items-center gap-1.5 truncate">
+              <span className="truncate">{currentStore.toUpperCase()} SELF CHECK-IN</span>
+              <span className="text-[9px] uppercase bg-emerald-500/20 text-emerald-300 font-mono px-1.5 py-0.2 rounded-full border border-emerald-500/30 shrink-0">
                 Live
               </span>
             </h1>
-            <p className="text-[10px] sm:text-xs text-slate-400 font-medium hidden sm:block">{currentStore} Touchscreen Entrance Kiosk</p>
+            <p className="text-[10px] sm:text-xs text-slate-400 font-medium hidden sm:block truncate">
+              {currentStore} Touchscreen Entrance Kiosk
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
           {/* Keypad Toggle Button */}
           <button
+            type="button"
             onClick={() => setShowKeypad(!showKeypad)}
-            className={`px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1 border transition-all ${
+            className={`px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1 border transition-all cursor-pointer ${
               showKeypad
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/40 shadow-sm'
                 : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
@@ -314,6 +325,7 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
 
           {onBackToStaffPOS && (
             <button
+              type="button"
               onClick={() => {
                 setExitPinInput('');
                 setExitPinError(null);
@@ -322,7 +334,9 @@ export const EntranceCheckInView: React.FC<EntranceCheckInViewProps> = ({
               className="px-2.5 py-1 sm:px-3 sm:py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 border border-slate-700 transition-colors shadow-sm cursor-pointer"
               title="Return to Staff Dashboard"
             >
-              <Lock className="w-3.5 h-3.5 text-emerald-400" /> Exit Kiosk / Staff POS
+              <Lock className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden xs:inline">Exit Kiosk</span>
+              <span className="xs:hidden">Exit</span>
             </button>
           )}
         </div>
