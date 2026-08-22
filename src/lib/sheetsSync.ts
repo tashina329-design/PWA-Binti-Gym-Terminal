@@ -1,4 +1,5 @@
 import { DashboardData, Member } from '../types';
+import { toIsoTimestampString, isSameDate } from './firebaseSync';
 
 export interface SpreadsheetInfo {
   spreadsheetId: string;
@@ -39,6 +40,83 @@ export interface FinancialPeriodMetrics {
 }
 
 const SPREADSHEET_TITLE = 'IronVault Gym - Management & Sales Log';
+const BRUNEI_TIMEZONE = 'Asia/Brunei';
+
+/**
+ * Robustly parses any timestamp (ISO string, epoch ms, Firestore Timestamp, or Date) to milliseconds.
+ */
+export function parseRecordTimestampMs(rec: any): number {
+  if (!rec) return 0;
+  const raw = rec.timestamp || rec.createdAt || rec.startDate || rec.time;
+  if (!raw) return 0;
+  if (typeof raw === 'number') return raw;
+  if (typeof raw?.toDate === 'function') {
+    try {
+      return raw.toDate().getTime();
+    } catch {}
+  }
+  if (typeof raw?.seconds === 'number') {
+    return raw.seconds * 1000 + (raw.nanoseconds || 0) / 1000000;
+  }
+  const d = new Date(raw);
+  const time = d.getTime();
+  if (!isNaN(time)) return time;
+  return 0;
+}
+
+/**
+ * Extracts a clean "YYYY-MM-DD" string from any date or timestamp representation.
+ */
+export function extractDateString(raw: any): string | null {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+  }
+  if (typeof raw?.toDate === 'function') {
+    try {
+      return raw.toDate().toISOString().split('T')[0];
+    } catch {}
+  }
+  if (typeof raw?.seconds === 'number') {
+    return new Date(raw.seconds * 1000).toISOString().split('T')[0];
+  }
+  const d = new Date(raw);
+  if (!isNaN(d.getTime())) {
+    try {
+      return d.toISOString().split('T')[0];
+    } catch {}
+  }
+  return null;
+}
+
+/**
+ * Formats a timestamp into a clear, legible Date & Time string for Google Sheets (e.g. "2026-08-22 09:30 AM").
+ */
+export function formatDateTimeForSheet(rawTimestamp: any, fallbackTime?: string): string {
+  if (!rawTimestamp && fallbackTime) return fallbackTime;
+  const iso = toIsoTimestampString(rawTimestamp);
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) {
+    return rawTimestamp ? String(rawTimestamp) : fallbackTime || '-';
+  }
+  try {
+    const year = d.toLocaleDateString('en-CA', { timeZone: BRUNEI_TIMEZONE, year: 'numeric' });
+    const month = d.toLocaleDateString('en-CA', { timeZone: BRUNEI_TIMEZONE, month: '2-digit' });
+    const day = d.toLocaleDateString('en-CA', { timeZone: BRUNEI_TIMEZONE, day: '2-digit' });
+    const timePart = d.toLocaleTimeString('en-US', {
+      timeZone: BRUNEI_TIMEZONE,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+    return `${year}-${month}-${day} ${timePart}`;
+  } catch {
+    const dateStr = d.toISOString().split('T')[0];
+    return fallbackTime ? `${dateStr} ${fallbackTime}` : dateStr;
+  }
+}
 
 /**
  * Helper to format date header: "REPORT FOR THU AUG 20 2026"
@@ -67,23 +145,78 @@ export function formatReportDateHeader(isoDateStr?: string): string {
 }
 
 /**
- * Calculates complete Daily Summary metrics matching the requested report layout.
+ * Finds all unique dates across all sales, expenses, attendance, and member records in the system.
  */
-export function calculateDailySummaryMetrics(data: DashboardData): DailySummaryMetrics {
-  const headerTitle = formatReportDateHeader(data.viewDate);
+export function getAllDistinctHistoricalDates(data: DashboardData): string[] {
+  const datesSet = new Set<string>();
+
+  if (data.viewDate) {
+    datesSet.add(data.viewDate);
+  } else {
+    datesSet.add(new Date().toISOString().split('T')[0]);
+  }
+
+  const allSales = data.store?.sales && data.store.sales.length > 0 ? data.store.sales : data.todaySales;
+  const allExpenses = data.store?.expenses && data.store.expenses.length > 0 ? data.store.expenses : data.todayExpenses;
+  const allAttendance = data.store?.attendance && data.store.attendance.length > 0 ? data.store.attendance : data.todayAttendance;
+  const allMembers = data.store?.members && data.store.members.length > 0 ? data.store.members : data.members;
+
+  for (const s of allSales) {
+    const dStr = extractDateString(s.timestamp || s.createdAt || s.time);
+    if (dStr) datesSet.add(dStr);
+  }
+
+  for (const e of allExpenses) {
+    const dStr = extractDateString(e.timestamp || e.createdAt || e.time);
+    if (dStr) datesSet.add(dStr);
+  }
+
+  for (const a of allAttendance) {
+    const dStr = extractDateString(a.timestamp || a.createdAt || a.time);
+    if (dStr) datesSet.add(dStr);
+  }
+
+  for (const m of allMembers) {
+    if (m.startDate) {
+      const dStr = extractDateString(m.startDate);
+      if (dStr) datesSet.add(dStr);
+    }
+  }
+
+  // Sort descending: latest date on top, historical dates follow
+  return Array.from(datesSet).sort((a, b) => b.localeCompare(a));
+}
+
+/**
+ * Calculates Daily Summary metrics for a specific historical date.
+ */
+export function calculateDailySummaryForSpecificDate(
+  dateStr: string,
+  allSales: any[],
+  allExpenses: any[],
+  allAttendance: any[],
+  allMembers: Member[]
+): DailySummaryMetrics {
+  const headerTitle = formatReportDateHeader(dateStr);
+
+  const dateSales = allSales.filter((s) => isSameDate(s.timestamp || s.createdAt || s.time, dateStr));
+  const dateExpenses = allExpenses.filter((e) => isSameDate(e.timestamp || e.createdAt || e.time, dateStr));
+  const dateAttendance = allAttendance.filter((a) => isSameDate(a.timestamp || a.createdAt || a.time, dateStr));
 
   // 1. Membership signups & Walk-ins
   const newMembershipCount =
-    data.todaySales.filter(
+    dateSales.filter(
       (s) =>
-        /membership|new member|member sign/i.test(s.category) ||
-        (/registration/i.test(s.category) && !/walk-?in/i.test(s.category))
+        /membership|new member|member sign/i.test(s.category || '') ||
+        (/registration/i.test(s.category || '') && !/walk-?in/i.test(s.category || ''))
     ).length ||
-    data.members.filter((m) => m.startDate === data.viewDate).length ||
+    allMembers.filter((m) => m.startDate === dateStr).length ||
     0;
 
   const walkInCount =
-    data.todaySales.filter((s) => /walk-?in/i.test(s.category)).length || 0;
+    dateSales.filter((s) => /walk-?in/i.test(s.category || '')).length ||
+    dateAttendance.filter((a) => /walk-?in|guest/i.test(a.plan || '') || a.memberId === 'GUEST').length ||
+    0;
 
   // 2. Income (Payment In)
   let cashIn = 0;
@@ -91,10 +224,10 @@ export function calculateDailySummaryMetrics(data: DashboardData): DailySummaryM
   let bibdIn = 0;
   let couponIn = 0;
 
-  for (const s of data.todaySales) {
-    if (/pt payout|pt out/i.test(s.category)) continue;
+  for (const s of dateSales) {
+    if (/pt payout|pt out/i.test(s.category || '')) continue;
     const amt = Number(s.amount) || 0;
-    const pay = (s.payment || '').toLowerCase();
+    const pay = (s.payment || s.paymentMethod || '').toLowerCase();
 
     if (pay.includes('cash')) {
       cashIn += amt;
@@ -117,9 +250,9 @@ export function calculateDailySummaryMetrics(data: DashboardData): DailySummaryM
   let bibdOut = 0;
   let couponOut = 0;
 
-  for (const e of data.todayExpenses) {
+  for (const e of dateExpenses) {
     const amt = Number(e.amount) || 0;
-    const pay = (e.payment || '').toLowerCase();
+    const pay = (e.payment || e.paymentMethod || '').toLowerCase();
 
     if (pay.includes('cash')) {
       cashOut += amt;
@@ -134,11 +267,11 @@ export function calculateDailySummaryMetrics(data: DashboardData): DailySummaryM
     }
   }
 
-  // Also include any PT Out payouts in expenses
-  for (const s of data.todaySales) {
-    if (/pt payout|pt out/i.test(s.category)) {
+  // Also include PT Out payouts in expenses
+  for (const s of dateSales) {
+    if (/pt payout|pt out/i.test(s.category || '')) {
       const amt = Number(s.amount) || 0;
-      const pay = (s.payment || '').toLowerCase();
+      const pay = (s.payment || s.paymentMethod || '').toLowerCase();
 
       if (pay.includes('baiduri') || pay.includes('card')) {
         baiduriOut += amt;
@@ -182,6 +315,19 @@ export function calculateDailySummaryMetrics(data: DashboardData): DailySummaryM
 }
 
 /**
+ * Calculates complete Daily Summary metrics matching the requested report layout for the currently viewed date.
+ */
+export function calculateDailySummaryMetrics(data: DashboardData): DailySummaryMetrics {
+  const allSales = data.store?.sales && data.store.sales.length > 0 ? data.store.sales : data.todaySales;
+  const allExpenses = data.store?.expenses && data.store.expenses.length > 0 ? data.store.expenses : data.todayExpenses;
+  const allAttendance = data.store?.attendance && data.store.attendance.length > 0 ? data.store.attendance : data.todayAttendance;
+  const allMembers = data.store?.members && data.store.members.length > 0 ? data.store.members : data.members;
+
+  const targetDate = data.viewDate || new Date().toISOString().split('T')[0];
+  return calculateDailySummaryForSpecificDate(targetDate, allSales, allExpenses, allAttendance, allMembers);
+}
+
+/**
  * Computes financial metrics for any array of sales and expenses.
  */
 function computePeriodFinancialMetrics(sales: any[], expenses: any[]): FinancialPeriodMetrics {
@@ -190,7 +336,7 @@ function computePeriodFinancialMetrics(sales: any[], expenses: any[]): Financial
   let bibdIn = 0;
 
   for (const s of sales) {
-    if (/pt payout|pt out/i.test(s.category)) continue;
+    if (/pt payout|pt out/i.test(s.category || '')) continue;
     const amt = Number(s.amount) || 0;
     const pay = (s.payment || s.paymentMethod || '').toLowerCase();
 
@@ -228,7 +374,7 @@ function computePeriodFinancialMetrics(sales: any[], expenses: any[]): Financial
 
   // Include PT Out sales as payouts
   for (const s of sales) {
-    if (/pt payout|pt out/i.test(s.category)) {
+    if (/pt payout|pt out/i.test(s.category || '')) {
       const amt = Number(s.amount) || 0;
       const pay = (s.payment || s.paymentMethod || '').toLowerCase();
 
@@ -272,9 +418,10 @@ export function calculateFinancialSummaryTable(data: DashboardData): Array<Array
 
   // 2. Month metrics
   const targetYearMonth = (data.viewDate || new Date().toISOString().split('T')[0]).substring(0, 7); // e.g. "2026-08"
-  const isThisMonth = (ts?: string) => {
+  const isThisMonth = (ts?: any) => {
     if (!ts) return false;
-    return ts.startsWith(targetYearMonth);
+    const iso = toIsoTimestampString(ts);
+    return iso.startsWith(targetYearMonth);
   };
 
   const monthSales = allSales.filter((s: any) => isThisMonth(s.timestamp || s.createdAt || s.time));
@@ -289,9 +436,11 @@ export function calculateFinancialSummaryTable(data: DashboardData): Array<Array
 
   // Get month label (e.g. "This Month (Aug 2026)")
   const dateObj = new Date(data.viewDate || Date.now());
-  const monthName = dateObj.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  const monthName = isNaN(dateObj.getTime())
+    ? 'This Month'
+    : dateObj.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 
-  return [
+  const summaryTable: Array<Array<string | number>> = [
     ['🏋️ GYM FINANCIAL SUMMARY', '', '', ''],
     ['Financial Metric', 'Today', `This Month (${monthName})`, 'Overall (All-Time)'],
     ['Total Revenue (Income)', fmt(todayMetrics.totalRevenue), fmt(monthMetrics.totalRevenue), fmt(overallMetrics.totalRevenue)],
@@ -306,6 +455,42 @@ export function calculateFinancialSummaryTable(data: DashboardData): Array<Array
     ['Baiduri Out', fmt(todayMetrics.baiduriOut), fmt(monthMetrics.baiduriOut), fmt(overallMetrics.baiduriOut)],
     ['BIBD Out', fmt(todayMetrics.bibdOut), fmt(monthMetrics.bibdOut), fmt(overallMetrics.bibdOut)],
   ];
+
+  // 4. Collect all distinct past months across allSales and allExpenses
+  const monthsMap = new Map<string, { sales: any[]; expenses: any[] }>();
+  for (const s of allSales) {
+    const iso = toIsoTimestampString(s.timestamp || s.createdAt || s.time);
+    const ym = iso.substring(0, 7);
+    if (/^\d{4}-\d{2}$/.test(ym)) {
+      if (!monthsMap.has(ym)) monthsMap.set(ym, { sales: [], expenses: [] });
+      monthsMap.get(ym)!.sales.push(s);
+    }
+  }
+  for (const e of allExpenses) {
+    const iso = toIsoTimestampString(e.timestamp || e.createdAt || e.time);
+    const ym = iso.substring(0, 7);
+    if (/^\d{4}-\d{2}$/.test(ym)) {
+      if (!monthsMap.has(ym)) monthsMap.set(ym, { sales: [], expenses: [] });
+      monthsMap.get(ym)!.expenses.push(e);
+    }
+  }
+
+  const sortedMonths = Array.from(monthsMap.keys()).sort((a, b) => b.localeCompare(a));
+  if (sortedMonths.length > 0) {
+    summaryTable.push(['', '', '', '']);
+    summaryTable.push(['📅 HISTORICAL MONTHLY BREAKDOWN', '', '', '']);
+    summaryTable.push(['Month / Year', 'Revenue ($)', 'Expenses ($)', 'Net Profit ($)']);
+    for (const ym of sortedMonths) {
+      const entry = monthsMap.get(ym)!;
+      const mMetrics = computePeriodFinancialMetrics(entry.sales, entry.expenses);
+      const [yearStr, mStr] = ym.split('-');
+      const d = new Date(Number(yearStr), Number(mStr) - 1, 1);
+      const label = isNaN(d.getTime()) ? ym : d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      summaryTable.push([label, fmt(mMetrics.totalRevenue), fmt(mMetrics.totalExpenses), fmt(mMetrics.netProfit)]);
+    }
+  }
+
+  return summaryTable;
 }
 
 /**
@@ -509,7 +694,7 @@ async function ensureMonthlySummarySheetExists(accessToken: string, spreadsheetI
  */
 async function fetchExistingDailySummaryRows(accessToken: string, spreadsheetId: string): Promise<string[][]> {
   try {
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'Daily Summary'!A1:B1000`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'Daily Summary'!A1:B50000`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
@@ -522,15 +707,15 @@ async function fetchExistingDailySummaryRows(accessToken: string, spreadsheetId:
 }
 
 /**
- * Merges the newest summary block at the very top, preserving older summaries below.
+ * Merges newly generated daily summary blocks with any older archive blocks already in Google Sheets.
  */
-function mergeDailySummariesLatestOnTop(
-  currentRows: Array<[string, string | number]>,
+function mergeDailySummariesWithGenerated(
+  generatedRows: Array<[string, string | number]>,
   existingRows: string[][],
-  currentHeader: string
+  generatedHeaderTitles: string[]
 ): Array<[string, string | number]> {
   if (!existingRows || existingRows.length === 0) {
-    return currentRows;
+    return generatedRows;
   }
 
   // Parse existing rows into separate blocks
@@ -567,15 +752,17 @@ function mergeDailySummariesLatestOnTop(
     blocks.push(currentBlock);
   }
 
-  // Filter out any block that matches current date's header to avoid duplicate on same day
-  const filteredPreviousBlocks = blocks.filter((b) => {
-    const firstRowA = (b[0]?.[0] || '').toString().trim();
-    return firstRowA !== currentHeader;
+  // Filter out any previous block that matches one of the freshly generated headers
+  const generatedHeadersUpper = new Set(generatedHeaderTitles.map((h) => h.toUpperCase().trim()));
+
+  const olderUnrepresentedBlocks = blocks.filter((b) => {
+    const firstRowA = (b[0]?.[0] || '').toString().trim().toUpperCase();
+    return !generatedHeadersUpper.has(firstRowA);
   });
 
-  const merged: Array<[string, string | number]> = [...currentRows];
+  const merged: Array<[string, string | number]> = [...generatedRows];
 
-  for (const block of filteredPreviousBlocks) {
+  for (const block of olderUnrepresentedBlocks) {
     // Add separator spacing row between daily summary blocks
     merged.push(['', '']);
     merged.push(...block);
@@ -585,7 +772,7 @@ function mergeDailySummariesLatestOnTop(
 }
 
 /**
- * Writes current gym dashboard data into the Google Sheets tabs, placing the latest summary on top.
+ * Writes complete gym data (all past historical records + all daily summaries) into the Google Sheets tabs.
  */
 export async function syncDataToGoogleSheets(
   accessToken: string,
@@ -595,31 +782,64 @@ export async function syncDataToGoogleSheets(
   // Ensure Monthly Summary tab exists in the destination spreadsheet
   const monthlySheetId = await ensureMonthlySummarySheetExists(accessToken, spreadsheetId);
 
-  const summaryMetrics = calculateDailySummaryMetrics(data);
-  const todaySummaryRows = buildDailySummaryRows(summaryMetrics);
+  // 1. Gather all historical records (store-wide datasets with today fallbacks)
+  const allSales = data.store?.sales && data.store.sales.length > 0 ? data.store.sales : data.todaySales;
+  const allExpenses = data.store?.expenses && data.store.expenses.length > 0 ? data.store.expenses : data.todayExpenses;
+  const allAttendance = data.store?.attendance && data.store.attendance.length > 0 ? data.store.attendance : data.todayAttendance;
+  const allMembers = data.store?.members && data.store.members.length > 0 ? data.store.members : data.members;
 
-  // 1. Fetch previous daily summary rows to stack newest at the top
+  // 2. Compute Daily Summary blocks for all distinct dates found in the data (newest on top)
+  const allDates = getAllDistinctHistoricalDates(data);
+  const generatedDailyBlocks: Array<Array<[string, string | number]>> = [];
+  const headerTitles: string[] = [];
+
+  for (const dStr of allDates) {
+    const metrics = calculateDailySummaryForSpecificDate(dStr, allSales, allExpenses, allAttendance, allMembers);
+    headerTitles.push(metrics.headerTitle);
+    generatedDailyBlocks.push(buildDailySummaryRows(metrics));
+  }
+
+  // Flatten generated blocks with spacing
+  const flatGeneratedRows: Array<[string, string | number]> = [];
+  for (let i = 0; i < generatedDailyBlocks.length; i++) {
+    if (i > 0) {
+      flatGeneratedRows.push(['', '']);
+    }
+    flatGeneratedRows.push(...generatedDailyBlocks[i]);
+  }
+
+  // 3. Fetch existing daily summary rows to preserve any older historical sheets rows
   const existingSummaryRows = await fetchExistingDailySummaryRows(accessToken, spreadsheetId);
-  const mergedSummaryRows = mergeDailySummariesLatestOnTop(
-    todaySummaryRows,
+  const mergedSummaryRows = mergeDailySummariesWithGenerated(
+    flatGeneratedRows,
     existingSummaryRows,
-    summaryMetrics.headerTitle
+    headerTitles
   );
 
-  // 2. Generate Monthly & Overall Financial Summary rows
+  // 4. Generate Monthly & Historical Financial Summary table
   const monthlySummaryRows = calculateFinancialSummaryTable(data);
 
-  // 3. Clear existing values across all data tabs first so stale/deleted rows are completely purged
+  // 5. Prepare all historical datasets in reverse chronological order (latest on top)
+  const sortedSales = [...allSales].sort((a, b) => parseRecordTimestampMs(b) - parseRecordTimestampMs(a));
+  const sortedAttendance = [...allAttendance].sort((a, b) => parseRecordTimestampMs(b) - parseRecordTimestampMs(a));
+  const sortedExpenses = [...allExpenses].sort((a, b) => parseRecordTimestampMs(b) - parseRecordTimestampMs(a));
+  const sortedMembers = [...allMembers].sort((a, b) => {
+    const timeA = a.startDate ? new Date(a.startDate).getTime() : 0;
+    const timeB = b.startDate ? new Date(b.startDate).getTime() : 0;
+    return timeB - timeA;
+  });
+
+  // 6. Clear existing values across all data tabs so stale rows are completely purged
   try {
     const clearUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`;
     const clearBody = {
       ranges: [
-        "'Daily Summary'!A1:Z5000",
-        "'Monthly Summary'!A1:Z500",
-        "'Sales Log'!A1:Z5000",
-        "'Check-In Log'!A1:Z5000",
-        "'Members Directory'!A1:Z5000",
-        "'Expenses Log'!A1:Z5000",
+        "'Daily Summary'!A1:Z50000",
+        "'Monthly Summary'!A1:Z5000",
+        "'Sales Log'!A1:Z50000",
+        "'Check-In Log'!A1:Z50000",
+        "'Members Directory'!A1:Z50000",
+        "'Expenses Log'!A1:Z50000",
       ],
     };
     await fetch(clearUrl, {
@@ -634,76 +854,76 @@ export async function syncDataToGoogleSheets(
     console.warn('Optional batch clear notice:', clearErr);
   }
 
-  // 4. Prepare batch update value ranges (writes exact fresh rows from A1 down)
+  // 7. Prepare batch update value ranges (all past data included)
   const valueRanges = [
-    // 1. Daily Summary (Latest on top)
+    // 1. Daily Summary (All past dates + latest on top)
     {
       range: "'Daily Summary'!A1",
       values: mergedSummaryRows,
     },
-    // 2. Monthly Financial Summary
+    // 2. Monthly Financial Summary (Includes today, this month, overall, and historical months)
     {
       range: "'Monthly Summary'!A1",
       values: monthlySummaryRows,
     },
-    // 3. Sales Log (Reverse chronological - latest on top)
+    // 3. Sales Log (All past sales - latest on top)
     {
       range: "'Sales Log'!A1",
       values: [
-        ['Timestamp / Time', 'Staff on Duty', 'Category', 'Customer / Guest', 'Phone Number', 'Payment Method', 'Amount ($)'],
-        ...data.todaySales.map((s) => [
-          s.timestamp || s.time,
+        ['Date & Time', 'Staff on Duty', 'Category', 'Customer / Guest', 'Phone Number', 'Payment Method', 'Amount ($)'],
+        ...sortedSales.map((s) => [
+          formatDateTimeForSheet(s.timestamp || s.createdAt, s.time),
           s.staff || 'Duty Staff',
-          s.category,
-          s.customer,
+          s.category || 'General',
+          s.customer || 'Walk-in Guest',
           s.phone && s.phone !== '-' ? s.phone : '-',
-          s.payment,
-          s.amount,
+          s.payment || s.paymentMethod || 'Cash',
+          Number(s.amount) || 0,
         ]),
       ],
     },
-    // 4. Check-In Log (Reverse chronological - latest on top)
+    // 4. Check-In Log (All past check-ins - latest on top)
     {
       range: "'Check-In Log'!A1",
       values: [
-        ['Check-In Time', 'Member / Guest Name', 'Phone Number', 'Plan / Activity', 'Check-In Status'],
-        ...data.todayAttendance.map((a) => [
-          a.timestamp || a.time,
-          a.name,
+        ['Check-In Date & Time', 'Member / Guest Name', 'Phone Number', 'Plan / Activity', 'Check-In Status'],
+        ...sortedAttendance.map((a) => [
+          formatDateTimeForSheet(a.timestamp || a.createdAt, a.time),
+          a.name || 'Guest',
           a.phone && a.phone !== '-' ? a.phone : '-',
-          a.plan,
-          a.status,
+          a.plan || '-',
+          a.status || 'Active',
         ]),
       ],
     },
-    // 5. Members Directory (Mirrors exact current members in the system)
+    // 5. Members Directory (All gym members in the system)
     {
       range: "'Members Directory'!A1",
       values: [
         ['Member ID', 'Full Name', 'Phone', 'Plan', 'Start Date', 'End Date', 'Status'],
-        ...data.members.map((m) => [
-          m.memberId,
-          m.name,
-          m.phone,
-          m.plan,
-          m.startDate,
-          m.endDate,
-          m.status,
+        ...sortedMembers.map((m) => [
+          m.memberId || '-',
+          m.name || '',
+          m.phone && m.phone !== '-' ? m.phone : '-',
+          m.plan || 'Standard Monthly',
+          m.startDate || '-',
+          m.endDate || '-',
+          m.status || 'Active',
         ]),
       ],
     },
-    // 6. Expenses Log (Reverse chronological - latest on top)
+    // 6. Expenses Log (All past expenses - latest on top)
     {
       range: "'Expenses Log'!A1",
       values: [
-        ['Time', 'Staff on Duty', 'Category', 'Description', 'Payment Method', 'Amount ($)'],
-        ...data.todayExpenses.map((e) => [
-          e.timestamp || e.time,
+        ['Date & Time', 'Staff on Duty', 'Category', 'Description', 'Payment Method', 'Amount ($)'],
+        ...sortedExpenses.map((e) => [
+          formatDateTimeForSheet(e.timestamp || e.createdAt, e.time),
           e.staff || 'Duty Staff',
-          e.category,
-          e.description,
-          e.payment,
-          e.amount,
+          e.category || 'General',
+          e.description || '-',
+          e.payment || e.paymentMethod || 'Cash',
+          Number(e.amount) || 0,
         ]),
       ],
     },
@@ -729,7 +949,7 @@ export async function syncDataToGoogleSheets(
     throw new Error(err.error?.message || 'Failed to update Google Sheets data');
   }
 
-  // 4. Apply rich visual styling to Daily Summary, Monthly Summary, and Log sheets
+  // 8. Apply rich visual styling to Daily Summary, Monthly Summary, and Log sheets
   try {
     await applyDailySummaryFormatting(accessToken, spreadsheetId, mergedSummaryRows);
     if (monthlySheetId !== null) {
