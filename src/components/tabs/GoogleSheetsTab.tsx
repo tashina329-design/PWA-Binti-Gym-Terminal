@@ -23,7 +23,9 @@ import {
   PlusCircle,
   Unlink,
   Settings2,
-  Check
+  Check,
+  Copy,
+  Globe
 } from 'lucide-react';
 import {
   initAuth,
@@ -75,6 +77,26 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const [copiedDomain, setCopiedDomain] = useState(false);
+  const [showDomainHelp, setShowDomainHelp] = useState(false);
+
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
+  const isVercelOrCustomDomain = Boolean(
+    currentHost &&
+    currentHost !== 'localhost' &&
+    currentHost !== '127.0.0.1' &&
+    !currentHost.includes('firebaseapp.com') &&
+    !currentHost.includes('web.app')
+  );
+
+  const handleCopyDomain = () => {
+    if (currentHost) {
+      navigator.clipboard.writeText(currentHost);
+      setCopiedDomain(true);
+      setTimeout(() => setCopiedDomain(false), 3000);
+    }
+  };
 
   // Compute live Daily Summary Report metrics
   const summaryMetrics = useMemo(() => {
@@ -374,9 +396,54 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
 
       {/* Error & Success Messages */}
       {errorMsg && (
-        <div className="p-4 bg-rose-950/40 border border-rose-500/50 rounded-xl text-rose-200 text-xs flex items-center gap-2.5">
-          <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-          <span>{errorMsg}</span>
+        <div className="space-y-3">
+          <div className="p-4 bg-rose-950/40 border border-rose-500/50 rounded-xl text-rose-200 text-xs flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-semibold">{errorMsg}</span>
+              {(errorMsg.includes('authorized') || errorMsg.includes('domain') || errorMsg.includes('invalid')) && (
+                <p className="text-[11px] text-rose-300/80">
+                  Firebase Authentication requires any domain where your app is deployed (e.g. Vercel) to be listed under <strong>Authorized Domains</strong> in the Firebase Console.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {(errorMsg.includes('authorized') || errorMsg.includes('domain') || errorMsg.includes('invalid')) && (
+            <div className="p-4 bg-slate-900 border border-amber-500/40 rounded-xl space-y-3 text-xs">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                  <Globe className="w-4 h-4 text-amber-400" /> Quick 2-Minute Fix for Vercel / Custom Domains:
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCopyDomain}
+                  className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-lg font-mono text-[11px] flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  {copiedDomain ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedDomain ? 'Copied!' : `Copy: ${currentHost || 'domain'}`}
+                </button>
+              </div>
+
+              <ol className="list-decimal list-inside space-y-1.5 text-slate-300 text-[11px] leading-relaxed">
+                <li>
+                  Open the <a href="https://console.firebase.google.com/project/gen-lang-client-0329117938/authentication/settings" target="_blank" rel="noreferrer" className="text-sky-400 underline hover:text-sky-300 font-bold inline-flex items-center gap-0.5">Firebase Console Auth Settings <ExternalLink className="w-3 h-3" /></a>.
+                </li>
+                <li>
+                  Scroll down to the <strong>Authorized domains</strong> section.
+                </li>
+                <li>
+                  Click <strong>Add domain</strong> and paste your Vercel domain: <code className="bg-slate-950 px-1.5 py-0.5 rounded text-amber-300 font-mono font-bold">{currentHost || 'your-app.vercel.app'}</code> (and <code className="bg-slate-950 px-1.5 py-0.5 rounded text-amber-300 font-mono font-bold">vercel.app</code>).
+                </li>
+                <li>
+                  Ensure Google Sign-in provider is enabled under <a href="https://console.firebase.google.com/project/gen-lang-client-0329117938/authentication/providers" target="_blank" rel="noreferrer" className="text-sky-400 underline hover:text-sky-300 font-bold inline-flex items-center gap-0.5">Sign-in method <ExternalLink className="w-3 h-3" /></a>.
+                </li>
+                <li>
+                  Refresh this page and click <strong>Sign in with Google</strong> again.
+                </li>
+              </ol>
+            </div>
+          )}
         </div>
       )}
 
