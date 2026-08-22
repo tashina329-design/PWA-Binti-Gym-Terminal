@@ -90,10 +90,49 @@ export function App() {
   const [isCheckinMode, setIsCheckinMode] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      return params.get('p') === 'checkin' || params.get('mode') === 'checkin' || window.location.hash === '#checkin';
+      const isUrlKiosk =
+        params.get('p') === 'checkin' ||
+        params.get('mode') === 'checkin' ||
+        window.location.hash === '#checkin' ||
+        window.location.pathname === '/checkin';
+      if (isUrlKiosk) return true;
+
+      try {
+        const savedMode = localStorage.getItem('gym_terminal_mode');
+        if (savedMode === 'kiosk') return true;
+      } catch {}
     }
     return false;
   });
+
+  const handleEnterCheckinMode = () => {
+    setIsCheckinMode(true);
+    try {
+      localStorage.setItem('gym_terminal_mode', 'kiosk');
+    } catch {}
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('mode', 'checkin');
+      window.history.replaceState(null, '', url.toString());
+    }
+  };
+
+  const handleExitCheckinMode = () => {
+    setIsCheckinMode(false);
+    try {
+      localStorage.setItem('gym_terminal_mode', 'staff');
+    } catch {}
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('mode');
+      url.searchParams.delete('p');
+      if (url.hash === '#checkin') {
+        url.hash = '';
+      }
+      const cleanPath = url.pathname + (url.search ? url.search : '');
+      window.history.replaceState(null, '', cleanPath);
+    }
+  };
 
   const [syncStatus, setSyncStatus] = useState<'connected' | 'reconnecting' | 'offline'>('connected');
 
@@ -103,7 +142,7 @@ export function App() {
       if (typeof window !== 'undefined') {
         const params = new URLSearchParams(window.location.search);
         if (params.get('p') === 'checkin' || params.get('mode') === 'checkin' || window.location.hash === '#checkin') {
-          setIsCheckinMode(true);
+          handleEnterCheckinMode();
         }
       }
     };
@@ -1209,17 +1248,12 @@ export function App() {
   // Standalone Customer Entrance Check-In Terminal Mode (Clean Kiosk: No staff pop up notifications)
   if (isCheckinMode) {
     return (
-      <div className="relative min-h-screen">
+      <div className="relative min-h-screen min-h-dvh">
         <EntranceCheckInView
           onCheckinPhone={handleCheckinPhone}
           onCheckinId={handleCheckinId}
           onRecordWalkIn={handleRecordWalkIn}
-          onBackToStaffPOS={() => {
-            setIsCheckinMode(false);
-            if (typeof window !== 'undefined' && window.location.search.includes('checkin')) {
-              window.history.pushState(null, '', window.location.pathname);
-            }
-          }}
+          onBackToStaffPOS={handleExitCheckinMode}
           currentStore={currentBusinessName || currentStore}
           availableStores={availableStores}
           currentBusinessPin={currentBusinessPin}
@@ -1232,7 +1266,7 @@ export function App() {
   const unreadNotifCount = notifications.filter((n) => !n.read).length;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-3 sm:p-5 lg:p-8 font-sans pb-28 md:pb-8 relative">
+    <div className="min-h-screen min-h-dvh bg-slate-950 text-slate-100 pt-safe pb-safe pl-safe pr-safe p-3 sm:p-5 lg:p-8 font-sans pb-28 md:pb-8 relative">
       {/* Floating Push Notification Banner on Main Terminal */}
       {activePushBanner && (
         <div className="fixed top-3 inset-x-3 sm:left-1/2 sm:-translate-x-1/2 sm:w-full sm:max-w-md z-[99999] animate-in slide-in-from-top-3 duration-300">
@@ -1354,7 +1388,7 @@ export function App() {
           onToggleSound={toggleSound}
           onOpenShiftModal={() => setShowShiftModal(true)}
           onLockTerminal={handleLogout}
-          onToggleCheckinMode={() => setIsCheckinMode(true)}
+          onToggleCheckinMode={handleEnterCheckinMode}
           onRefresh={() => {
             setIsRefreshing(true);
             setTimeout(() => setIsRefreshing(false), 500);
@@ -1422,7 +1456,7 @@ export function App() {
           onTabChange={setActiveTab}
           activeShift={activeShift}
           onOpenShiftModal={() => setShowShiftModal(true)}
-          onToggleCheckinMode={() => setIsCheckinMode(true)}
+          onToggleCheckinMode={handleEnterCheckinMode}
           unreadNotifCount={unreadNotifCount}
           onOpenNotifications={() => setShowNotificationsModal(true)}
         />
@@ -1451,7 +1485,7 @@ export function App() {
               </button>
               <button
                 type="button"
-                onClick={() => setIsCheckinMode(true)}
+                onClick={handleEnterCheckinMode}
                 className="w-full sm:w-auto px-5 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-sm flex items-center justify-center gap-2 border border-slate-700 transition cursor-pointer"
               >
                 <Monitor className="w-4 h-4 text-emerald-400" /> Customer Entrance Kiosk
