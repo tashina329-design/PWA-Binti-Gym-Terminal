@@ -282,7 +282,13 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
       });
       setLastSynced(nowStr);
       localStorage.setItem(`last_sheets_sync_time_${effectiveStore}`, nowStr);
-      setSuccessMsg(`Successfully pushed ${effectiveStore} data (Daily & Monthly Summaries, sales, check-ins, members, expenses) to "${spreadsheet.title}" at ${nowStr}!`);
+      
+      const totalSales = dashboardData.store?.sales?.length || dashboardData.todaySales.length;
+      const totalCheckIns = dashboardData.store?.attendance?.length || dashboardData.todayAttendance.length;
+      const totalMembers = dashboardData.store?.members?.length || dashboardData.members.length;
+      const totalExpenses = dashboardData.store?.expenses?.length || dashboardData.todayExpenses.length;
+
+      setSuccessMsg(`🎉 Successfully pushed all past & current data for ${effectiveStore} (${totalSales} sales, ${totalCheckIns} check-ins, ${totalMembers} members, ${totalExpenses} expenses) + Daily & Monthly Summaries to "${spreadsheet.title}" at ${nowStr}!`);
     } catch (err: any) {
       console.error('Sync failed:', err);
       setErrorMsg(err.message || 'Failed to sync data to Google Sheets.');
@@ -666,37 +672,62 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
 
             {/* Sync Content Payload Stats */}
             <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-3">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-2">
-                <ClipboardList className="w-4 h-4 text-emerald-400" /> Current Data Payload for {effectiveStore}
-              </h3>
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <ClipboardList className="w-4 h-4 text-emerald-400" /> Full Historical & Current Payload ({effectiveStore})
+                </h3>
+                <span className="text-[10px] text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded font-mono">
+                  All-Time Sync Enabled
+                </span>
+              </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                 <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl space-y-1">
                   <span className="text-slate-400 flex items-center gap-1 text-[11px]">
-                    <DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Sales Records
+                    <DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Total Sales Records
                   </span>
-                  <p className="text-base font-bold text-white">{dashboardData.todaySales.length}</p>
+                  <p className="text-base font-bold text-white">
+                    {dashboardData.store?.sales?.length || dashboardData.todaySales.length}
+                    <span className="text-[10px] text-slate-400 font-normal ml-1.5">
+                      ({dashboardData.todaySales.length} today)
+                    </span>
+                  </p>
                 </div>
 
                 <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl space-y-1">
                   <span className="text-slate-400 flex items-center gap-1 text-[11px]">
-                    <Calendar className="w-3.5 h-3.5 text-sky-400" /> Check-In Visits
+                    <Calendar className="w-3.5 h-3.5 text-sky-400" /> Total Check-In Visits
                   </span>
-                  <p className="text-base font-bold text-white">{dashboardData.todayAttendance.length}</p>
+                  <p className="text-base font-bold text-white">
+                    {dashboardData.store?.attendance?.length || dashboardData.todayAttendance.length}
+                    <span className="text-[10px] text-slate-400 font-normal ml-1.5">
+                      ({dashboardData.todayAttendance.length} today)
+                    </span>
+                  </p>
                 </div>
 
                 <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl space-y-1">
                   <span className="text-slate-400 flex items-center gap-1 text-[11px]">
-                    <Users className="w-3.5 h-3.5 text-purple-400" /> Registered
+                    <Users className="w-3.5 h-3.5 text-purple-400" /> Total Members
                   </span>
-                  <p className="text-base font-bold text-white">{dashboardData.members.length}</p>
+                  <p className="text-base font-bold text-white">
+                    {dashboardData.store?.members?.length || dashboardData.members.length}
+                    <span className="text-[10px] text-slate-400 font-normal ml-1.5">
+                      (directory)
+                    </span>
+                  </p>
                 </div>
 
                 <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-xl space-y-1">
                   <span className="text-slate-400 flex items-center gap-1 text-[11px]">
-                    <DollarSign className="w-3.5 h-3.5 text-rose-400" /> Expenses
+                    <DollarSign className="w-3.5 h-3.5 text-rose-400" /> Total Expenses
                   </span>
-                  <p className="text-base font-bold text-white">{dashboardData.todayExpenses.length}</p>
+                  <p className="text-base font-bold text-white">
+                    {dashboardData.store?.expenses?.length || dashboardData.todayExpenses.length}
+                    <span className="text-[10px] text-slate-400 font-normal ml-1.5">
+                      ({dashboardData.todayExpenses.length} today)
+                    </span>
+                  </p>
                 </div>
               </div>
             </div>
@@ -840,9 +871,19 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
               </div>
             </div>
 
-            <p className="text-xs text-slate-300 leading-relaxed bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-              Are you sure you want to sync <strong>{effectiveStore}</strong>'s data (formatted <strong>Daily Summary</strong>, <strong>Monthly Financial Summary</strong>, sales ({dashboardData.todaySales.length}), check-ins ({dashboardData.todayAttendance.length}), members ({dashboardData.members.length}), and expenses) to your dedicated Google Spreadsheet (<strong>{spreadsheet?.title}</strong>)?
-            </p>
+            <div className="text-xs text-slate-300 leading-relaxed bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2">
+              <p>
+                This will push <strong>all past & current history</strong> for <strong>{effectiveStore}</strong> to your dedicated Google Spreadsheet (<strong>{spreadsheet?.title}</strong>):
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-slate-300 text-[11px]">
+                <li><strong>Daily Summary:</strong> Complete executive daily reports for all recorded dates (latest on top).</li>
+                <li><strong>Monthly Summary:</strong> Today, current month, all-time totals, and historical monthly breakdown.</li>
+                <li><strong>Sales Log:</strong> All {dashboardData.store?.sales?.length || dashboardData.todaySales.length} historical sales records.</li>
+                <li><strong>Check-In Log:</strong> All {dashboardData.store?.attendance?.length || dashboardData.todayAttendance.length} historical check-ins.</li>
+                <li><strong>Members Directory:</strong> All {dashboardData.store?.members?.length || dashboardData.members.length} registered members.</li>
+                <li><strong>Expenses Log:</strong> All {dashboardData.store?.expenses?.length || dashboardData.todayExpenses.length} historical expenses.</li>
+              </ul>
+            </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
@@ -855,7 +896,7 @@ export const GoogleSheetsTab: React.FC<GoogleSheetsTabProps> = ({ dashboardData,
                 onClick={executeSync}
                 className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-md shadow-emerald-950/40 cursor-pointer"
               >
-                <CheckCircle2 className="w-4 h-4" /> Confirm & Sync Now
+                <CheckCircle2 className="w-4 h-4" /> Push All History to Google Sheets
               </button>
             </div>
           </div>
