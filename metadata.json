@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Staff POS \u0026 Gym Management Terminal",
+  "description": "BINTI Gym - Staff POS & Management Terminal, Member Check-ins, Class Passes, and Live Gym Operations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
